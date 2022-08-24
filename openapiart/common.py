@@ -18,11 +18,14 @@ except ImportError:
     from typing_extensions import Literal
 
 if sys.version_info[0] == 3:
-    import aiohttp
     unicode = str
-else:
-    import requests
 
+
+
+if sys.version_info[0] > 2 and sys.version_info[1] > 4:   
+    import aiohttp
+else:
+    import requests       
 
 class Transport:
     HTTP = "http"
@@ -119,7 +122,7 @@ class HttpTransport(object):
             )
         )
         self.set_verify(self.verify)
-        if sys.version_info[0] == 3:
+        if sys.version_info[0] > 2 and sys.version_info[1] > 4:            
             self._session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(verify_ssl=False))
         else:
             self._session = requests.Session()
@@ -152,8 +155,8 @@ class HttpTransport(object):
             else:
                 raise Exception("Type of payload provided is unknown")
             
-        if sys.version_info[0] == 3:
-            async def async_part():    
+        if sys.version_info[0] > 2 and sys.version_info[1] > 4:            
+            async_code = """async def async_part():    
                 async with self._session.request(
                     method=method,
                     url=url,
@@ -184,6 +187,9 @@ class HttpTransport(object):
                         raise Exception(
                             response.status_code, yaml.safe_load(response.text)
                         )
+                """
+                
+            exec(compile(async_code, __file__, "exec"))
 
             loop = asyncio.get_event_loop()
             return loop.run_until_complete(async_part())
