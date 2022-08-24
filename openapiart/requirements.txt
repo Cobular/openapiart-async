@@ -1,6 +1,7 @@
 --prefer-binary
 jsonpath-ng
 openapi-spec-validator
+aiohttp
 requests
 typing
 setuptools
