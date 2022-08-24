@@ -3,7 +3,6 @@ import importlib
 import logging
 import json
 import yaml
-import aiohttp
 import urllib3
 import io
 import sys
@@ -19,7 +18,10 @@ except ImportError:
     from typing_extensions import Literal
 
 if sys.version_info[0] == 3:
+    import aiohttp
     unicode = str
+else:
+    import requests
 
 
 class Transport:
@@ -117,7 +119,10 @@ class HttpTransport(object):
             )
         )
         self.set_verify(self.verify)
-        self._session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(verify_ssl=False))
+        if sys.version_info[0] == 3:
+            self._session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(verify_ssl=False))
+        else:
+            self._session = requests.Session()
 
     def set_verify(self, verify):
         self.verify = verify
@@ -147,40 +152,74 @@ class HttpTransport(object):
             else:
                 raise Exception("Type of payload provided is unknown")
             
-        async def async_part():    
-            async with self._session.request(
+        if sys.version_info[0] == 3:
+            async def async_part():    
+                async with self._session.request(
+                    method=method,
+                    url=url,
+                    data=data,
+                    headers=headers,
+                    allow_redirects=True,
+                ) as response:
+                    if response.ok:
+                        if "application/json" in response.headers["content-type"]:
+                            # TODO: we might want to check for utf-8 charset and decode
+                            # accordingly, but current impl works for now
+                            response_dict = yaml.safe_load(response.text)
+                            if return_object is None:
+                                # if response type is not provided, return dictionary
+                                # instead of python object
+                                return response_dict
+                            else:
+                                return return_object.deserialize(response_dict)
+                        elif (
+                            "application/octet-stream" in response.headers["content-type"]
+                        ):
+                            return io.BytesIO(response.content)
+                        else:
+                            # TODO: for now, return bare response object for unknown
+                            # content types
+                            return response
+                    else:
+                        raise Exception(
+                            response.status_code, yaml.safe_load(response.text)
+                        )
+
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(async_part())
+        else:
+            response = self._session.request(
                 method=method,
                 url=url,
                 data=data,
-                headers=headers,
+                verify=False,
                 allow_redirects=True,
-            ) as response:
-                if response.ok:
-                    if "application/json" in response.headers["content-type"]:
-                        # TODO: we might want to check for utf-8 charset and decode
-                        # accordingly, but current impl works for now
-                        response_dict = yaml.safe_load(response.text)
-                        if return_object is None:
-                            # if response type is not provided, return dictionary
-                            # instead of python object
-                            return response_dict
-                        else:
-                            return return_object.deserialize(response_dict)
-                    elif (
-                        "application/octet-stream" in response.headers["content-type"]
-                    ):
-                        return io.BytesIO(response.content)
+                # TODO: add a timeout here
+                headers=headers,
+            )
+            if response.ok:
+                if "application/json" in response.headers["content-type"]:
+                    # TODO: we might want to check for utf-8 charset and decode
+                    # accordingly, but current impl works for now
+                    response_dict = yaml.safe_load(response.text)
+                    if return_object is None:
+                        # if response type is not provided, return dictionary
+                        # instead of python object
+                        return response_dict
                     else:
-                        # TODO: for now, return bare response object for unknown
-                        # content types
-                        return response
+                        return return_object.deserialize(response_dict)
+                elif (
+                    "application/octet-stream" in response.headers["content-type"]
+                ):
+                    return io.BytesIO(response.content)
                 else:
-                    raise Exception(
-                        response.status_code, yaml.safe_load(response.text)
-                    )
-
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(async_part())
+                    # TODO: for now, return bare response object for unknown
+                    # content types
+                    return response
+            else:
+                raise Exception(
+                    response.status_code, yaml.safe_load(response.text)
+                )
         
 
 class OpenApiBase(object):
